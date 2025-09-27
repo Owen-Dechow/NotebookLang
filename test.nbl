@@ -1,0 +1,49 @@
+def MyStruct (
+    let [Z] myIntArray = [10, 11]
+    let {B} myBoolSet = {true, false}
+    let {N->N} myNaturalMap = {1 -> 2, 3 -> 4}
+    let R myReal2Function(x) = x^2
+    let static S myString = "Hello World\nHi"
+)
+
+def Struct2 (
+    let Z value = 10
+
+    impl S asS()?ValueError = {
+        true -> raise ValueError(msg="This failed"),
+        false -> "value=%" % value,
+    }(value == 0)
+
+    impl S display() = (
+        let result = capture {
+            ValueError:x -> x:msg,
+        } asS()
+    ) result
+)
+
+let Z f(Z x) = 10 + x + 3
+
+let R g(Z x) = (
+    let c = f(x)
+    let m = c^0.5
+) c*4
+
+let Z m(B a, Z x) = {
+    true -> x,
+    false -> x + 1,
+}(a)(x)
+
+let Z p(Z x) = {
+    0 -> 1,
+    2 -> 3,
+    4 -> -1,
+    6 -> 8,
+    _ -> x - 5,
+}(x)
+
+let Z h(Z x) = g . f . m(false, x)
+
+let main(a) = (
+    println . h(10)
+    let s = Struct2(value = 13)
+)
