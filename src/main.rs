@@ -1,13 +1,14 @@
 use std::path::Path;
-
-use crate::lexer::token_stream::TokenStream;
-
 mod lexer;
 mod location;
+mod parser;
 
-fn run_file<T: AsRef<Path>>(file: T) {
-    let ts = TokenStream::from_file(&file);
-    let _ = dbg!(ts);
+fn run_file<T: AsRef<Path>>(file: T) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ts = lexer::lex_file(file)?;
+    let abstract_st = parser::parse_token_stream(&mut ts);
+    dbg!(abstract_st);
+
+    return Ok(());
 }
 
 fn main() {
@@ -15,7 +16,7 @@ fn main() {
     let file = args.nth(1);
 
     if let Some(file) = file {
-        run_file(file);
+        let _ = run_file(file);
     } else {
         println!("No file passed")
     }

@@ -1,15 +1,71 @@
-use crate::lexer::{char_stream::CharStream, syntax, Token, TokenType};
+use crate::lexer::{
+    char_stream::CharStream,
+    syntax,
+    tokens::{Token, TokenType},
+};
 use std::path::Path;
 
+pub(crate) struct TokenStreamPoint(usize, bool);
+
+impl TokenStreamPoint {
+    pub(crate) fn restore(self, ts: &mut TokenStream) {
+        ts.index = self.0;
+        ts.retake = self.1;
+    }
+}
+
 #[derive(Debug)]
-pub struct TokenStream {
+pub(crate) struct TokenStream {
     tokens: Vec<Token>,
+    index: usize,
+    retake: bool,
 }
 
 impl TokenStream {
-    pub fn from_file<T: AsRef<Path>>(file: &T) -> Result<Self, std::io::Error> {
-        let content = std::fs::read_to_string(file)?;
-        let mut cs = CharStream::new(&content, file);
+    pub(crate) fn take(&mut self) -> Option<Token> {
+        if self.retake {
+            self.retake = false;
+            return self.tokens.get(self.index - 1).cloned();
+        }
+
+        let t = self.tokens.get(self.index)?;
+        self.index += 1;
+        return Some(t.clone());
+    }
+
+    pub(crate) fn etake(&mut self) -> Token {
+        self.take().expect("Token is guaranteed to exist here")
+    }
+
+    pub(crate) fn etake_type(&mut self, t: &TokenType) -> Token {
+        let token = self.etake();
+        if !token.is_type(t) {
+            panic!("Token is guaranteed to be of type '{:?}'", t);
+        }
+
+        return token;
+    }
+
+    pub(crate) fn take_sig(&mut self) -> Option<Token> {
+        let t = self.take()?;
+        return match t.is_type(&TokenType::Comment) {
+            true => self.take_sig(),
+            false => Some(t),
+        };
+    }
+
+    pub(crate) fn retake(&mut self) {
+        self.retake = true;
+    }
+
+    pub(crate) fn point(&self) -> TokenStreamPoint {
+        TokenStreamPoint(self.index, self.retake)
+    }
+}
+
+impl TokenStream {
+    pub(super) fn from_str<S: AsRef<str>, P: AsRef<Path>>(content: S, file: P) -> Self {
+        let mut cs = CharStream::new(&content, &file);
         let mut tokens = Vec::new();
 
         while let Some(c) = cs.take_sig() {
@@ -26,7 +82,20 @@ impl TokenStream {
             }
         }
 
-        return Ok(Self { tokens });
+        return Self {
+            tokens,
+            ..Default::default()
+        };
+    }
+}
+
+impl Default for TokenStream {
+    fn default() -> Self {
+        Self {
+            tokens: Default::default(),
+            index: 0,
+            retake: false,
+        }
     }
 }
 
@@ -106,7 +175,7 @@ fn parse_string(cs: &mut CharStream<'_>) -> Token {
     }
 
     let loc = cs.build_loc(&value);
-    return Token::new(TokenType::Str, value, loc);
+    return Token::new(TokenType::StrLit, value, loc);
 }
 
 fn parse_digit(cs: &mut CharStream) -> Token {

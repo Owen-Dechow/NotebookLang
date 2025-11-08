@@ -1,6 +1,6 @@
-use crate::lexer::TokenType;
+use crate::lexer::tokens::TokenType;
 
-pub const OPERATORS: phf::Map<&str, TokenType> = phf::phf_map! {
+pub(super) const OPERATORS: phf::Map<&str, TokenType> = phf::phf_map! {
     "?" => TokenType::CanExcept,
     "=" => TokenType::Assign,
     "(" => TokenType::OpenParen,
@@ -28,23 +28,27 @@ pub const OPERATORS: phf::Map<&str, TokenType> = phf::phf_map! {
     "!" => TokenType::Factorial,
     "!=" => TokenType::NotEqual,
     "!~" => TokenType::NotSimilar,
+    "$" => TokenType::DenoteBlock,
 };
 
-pub const KEY_WORDS: phf::Map<&str, TokenType> = phf::phf_map! {
+pub(super) const KEY_WORDS: phf::Map<&str, TokenType> = phf::phf_map! {
     "def" => TokenType::Def,
     "let" => TokenType::Let,
     "static" => TokenType::Static,
     "impl" => TokenType::Impl,
     "capture" => TokenType::Capture,
+    "raise" => TokenType::Raise,
     "B" => TokenType::Bool,
     "Z" => TokenType::Int,
     "R" => TokenType::Real,
     "N" => TokenType::Natural,
+    "S" => TokenType::Str,
     "undefined" => TokenType::Undefined,
     "true" => TokenType::True,
+    "open" => TokenType::Open,
     "false" => TokenType::False,
 };
 
-pub const STRING_QUOTES: [char; 3] = ['"', '\'', '`'];
-pub const LINE_COMMENT: char = '#';
-pub const VALID_VARIABLE: [char; 2] = ['_', '@'];
+pub(super) const STRING_QUOTES: [char; 3] = ['"', '\'', '`'];
+pub(super) const LINE_COMMENT: char = '#';
+pub(super) const VALID_VARIABLE: [char; 2] = ['_', '@'];

@@ -1,8 +1,7 @@
 use std::{ops::Range, path::PathBuf, usize};
 
-
-#[derive(Debug)]
-pub struct Location {
-    pub file: PathBuf,
-    pub file_range: Range<usize>,
+#[derive(Debug, Clone)]
+pub(crate) struct Location {
+    pub(crate) file: PathBuf,
+    pub(crate) file_range: Range<usize>,
 }

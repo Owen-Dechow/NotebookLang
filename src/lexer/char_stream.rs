@@ -2,7 +2,7 @@ use std::{path::Path, str::Chars};
 
 use crate::location::Location;
 
-pub struct CharStream<'a> {
+pub(super) struct CharStream<'a> {
     file: &'a Path,
     chars: Chars<'a>,
     location: usize,
@@ -11,9 +11,9 @@ pub struct CharStream<'a> {
 }
 
 impl<'a> CharStream<'a> {
-    pub fn new<T: AsRef<Path>>(string: &'a String, file: &'a T) -> Self {
+    pub(super) fn new<S: AsRef<str>, P: AsRef<Path>>(string: &'a S, file: &'a P) -> Self {
         Self {
-            chars: string.chars(),
+            chars: string.as_ref().chars(),
             location: 0,
             retake: false,
             last: None,
@@ -21,7 +21,7 @@ impl<'a> CharStream<'a> {
         }
     }
 
-    pub fn take(&mut self) -> Option<char> {
+    pub(super) fn take(&mut self) -> Option<char> {
         if self.retake {
             self.retake = false;
         } else {
@@ -32,7 +32,7 @@ impl<'a> CharStream<'a> {
         return self.last;
     }
 
-    pub fn take_sig(&mut self) -> Option<char> {
+    pub(super) fn take_sig(&mut self) -> Option<char> {
         let c = self.take()?;
 
         if c.is_whitespace() {
@@ -43,14 +43,14 @@ impl<'a> CharStream<'a> {
         }
     }
 
-    pub fn retake(&mut self) {
+    pub(super) fn retake(&mut self) {
         self.retake = true;
     }
 
-    pub fn build_loc<T: AsRef<str>>(&self, value: T) -> crate::location::Location {
+    pub(super) fn build_loc<T: AsRef<str>>(&self, value: T) -> crate::location::Location {
         Location {
             file: self.file.to_path_buf(),
-            file_range: self.location - value.as_ref().chars().count() .. self.location,
+            file_range: self.location - 1 - value.as_ref().chars().count()..(self.location - 1),
         }
     }
 }

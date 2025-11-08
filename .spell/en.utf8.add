@@ -13,3 +13,7 @@ iostream
 ifndef
 notebooklang
 paren
+setmap
+operon
+newexp
+concatcp
