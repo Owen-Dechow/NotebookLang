@@ -1,3 +1,5 @@
+use std::{collections::HashMap, fmt::Display};
+
 use crate::{
     fli,
     lexer::{Token, TokenStream, TokenType},
@@ -5,7 +7,7 @@ use crate::{
         absorb_comma_or_allow,
         abstract_syntax_tree::{parse_variable_reference, AbstractVariableReference},
         abstract_type::{parse_type, AbstractType},
-        expression_parser_log, parse_identity,
+        parse_identity,
         syntax_error::SyntaxError,
         take_next_if_type, take_sig_of_type,
     },
@@ -72,6 +74,19 @@ pub(crate) enum AbstractCallArgs {
     NamedArgs(Vec<(Token, AbstractExpression)>),
 }
 
+impl AbstractCallArgs {
+    fn sorted(self) -> Self {
+        match self {
+            AbstractCallArgs::ArgList(args) => {
+                AbstractCallArgs::ArgList(args.into_iter().map(|arg| arg.sorted()).collect())
+            }
+            AbstractCallArgs::NamedArgs(items) => AbstractCallArgs::NamedArgs(
+                items.into_iter().map(|(k, v)| (k, v.sorted())).collect(),
+            ),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum AbstractExpression {
     IntLiteral(Token),
@@ -90,13 +105,188 @@ pub(crate) enum AbstractExpression {
     Call(AbstractCall),
     VariableReference(AbstractVariableReference),
     Raise(Box<AbstractExpression>),
-    Negate(Box<AbstractExpression>),
     Group(Box<AbstractExpression>),
 }
 
 impl AbstractExpression {
-    pub fn sort(self) -> Self {
-        todo!()
+    fn sort_binary_expression(
+        left: AbstractExpression,
+        token: Token,
+        right: AbstractExpression,
+    ) -> AbstractExpression {
+        let precedence = HashMap::from([
+            (TokenType::Equals, 1),
+            (TokenType::NotEqual, 1),
+            (TokenType::Similar, 1),
+            (TokenType::NotSimilar, 1),
+            (TokenType::GreaterThan, 2),
+            (TokenType::GreaterThanOrEqual, 2),
+            (TokenType::LessThanOrEqual, 2),
+            (TokenType::LessThan, 2),
+            (TokenType::Add, 3),
+            (TokenType::Subtract, 3),
+            (TokenType::Multiply, 4),
+            (TokenType::Divide, 4),
+            (TokenType::Modulate, 5),
+            (TokenType::Exponentiate, 5),
+            (TokenType::Compose, 6),
+            (TokenType::Peek, 6),
+        ]);
+
+        let sorted_left = left.sorted();
+        let sorted_right = right.sorted();
+        let prec = precedence[&token.r#type];
+
+        if let AbstractExpression::BinaryOperation(_, ref ltoken, _) = sorted_left {
+            let l_prec = precedence[&ltoken.r#type];
+            if l_prec < prec {
+                if let AbstractExpression::BinaryOperation(lleft, ltoken, lright) = sorted_left {
+                    let new_right =
+                        AbstractExpression::BinaryOperation(lright, token, sorted_right.into());
+                    return AbstractExpression::BinaryOperation(
+                        lleft,
+                        ltoken,
+                        new_right.sorted().into(),
+                    );
+                }
+            }
+        }
+
+        if let AbstractExpression::BinaryOperation(_, ref rtoken, _) = sorted_right {
+            let r_prec = precedence[&rtoken.r#type];
+            if r_prec <= prec {
+                if let AbstractExpression::BinaryOperation(rleft, rtoken, rright) = sorted_right {
+                    let new_left =
+                        AbstractExpression::BinaryOperation(sorted_left.into(), token, rleft);
+                    return AbstractExpression::BinaryOperation(
+                        new_left.sorted().into(),
+                        rtoken,
+                        rright,
+                    );
+                }
+            }
+        }
+
+        return AbstractExpression::BinaryOperation(sorted_left.into(), token, sorted_right.into());
+    }
+
+    fn sort_unary_expression(token: Token, right: AbstractExpression) -> AbstractExpression {
+        let sorted_right = right.sorted();
+
+        if let AbstractExpression::BinaryOperation(bleft, btoken, bright) = sorted_right {
+            let left = AbstractExpression::UnaryOperation(token, bleft);
+            return AbstractExpression::BinaryOperation(
+                left.sorted().into(),
+                btoken,
+                bright.sorted().into(),
+            )
+            .sorted();
+        }
+
+        return AbstractExpression::UnaryOperation(token, sorted_right.into());
+    }
+
+    fn sort_raise_expression(exp: AbstractExpression) -> AbstractExpression {
+        let sorted_exp = exp.sorted();
+
+        if let AbstractExpression::BinaryOperation(bleft, btoken, bright) = sorted_exp {
+            let left = AbstractExpression::Raise(bleft);
+            return AbstractExpression::BinaryOperation(
+                left.sorted().into(),
+                btoken,
+                bright.sorted().into(),
+            )
+            .sorted();
+        }
+
+        return AbstractExpression::Raise(sorted_exp.into());
+    }
+
+    fn sorted(self) -> Self {
+        return match self {
+            AbstractExpression::IntLiteral(..)
+            | AbstractExpression::RealLiteral(..)
+            | AbstractExpression::StrLiteral(..)
+            | AbstractExpression::Undefined(..)
+            | AbstractExpression::Block(..)
+            | AbstractExpression::EmptySet
+            | AbstractExpression::VariableReference(..)
+            | AbstractExpression::BoolLiteral(..) => self,
+            AbstractExpression::Group(abstract_expression) => {
+                AbstractExpression::Group(abstract_expression.sorted().into())
+            }
+            AbstractExpression::Map(map) => AbstractExpression::Map(AbstractMap {
+                mappings: map
+                    .mappings
+                    .into_iter()
+                    .map(|(k, v)| (k.sorted(), v.sorted()))
+                    .collect(),
+            }),
+            AbstractExpression::Set(set) => AbstractExpression::Set(AbstractSet {
+                items: set.items.into_iter().map(|v| v.sorted()).collect(),
+            }),
+            AbstractExpression::List(list) => AbstractExpression::List(AbstractList {
+                items: list.items.into_iter().map(|v| v.sorted()).collect(),
+            }),
+            AbstractExpression::UnaryOperation(token, right) => {
+                Self::sort_unary_expression(token, *right)
+            }
+            AbstractExpression::BinaryOperation(left, token, right) => {
+                Self::sort_binary_expression(*left, token, *right)
+            }
+            AbstractExpression::Capture(capture) => AbstractExpression::Capture(AbstractCapture {
+                captures: capture
+                    .captures
+                    .into_iter()
+                    .map(|(k, e, v)| (k, e, v.sorted()))
+                    .collect(),
+                expression: capture.expression.sorted().into(),
+            }),
+            AbstractExpression::Call(call) => AbstractExpression::Call(AbstractCall {
+                func: call.func.sorted().into(),
+                args: call.args.sorted(),
+            }),
+            AbstractExpression::Raise(exp) => Self::sort_raise_expression(*exp),
+        };
+    }
+}
+
+impl Display for AbstractExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                AbstractExpression::RealLiteral(token)
+                | AbstractExpression::StrLiteral(token)
+                | AbstractExpression::BoolLiteral(token)
+                | AbstractExpression::Undefined(token)
+                | AbstractExpression::IntLiteral(token) => token.value.clone(),
+                AbstractExpression::UnaryOperation(token, abstract_expression) => {
+                    format!("{}({})", token.value, abstract_expression)
+                }
+                AbstractExpression::BinaryOperation(
+                    abstract_expression,
+                    token,
+                    abstract_expression1,
+                ) => format!(
+                    "({} {} {})",
+                    abstract_expression, token.value, abstract_expression1
+                ),
+                AbstractExpression::Block(..) => "(...)".into(),
+                AbstractExpression::Map(..) => "{... -> ...}".into(),
+                AbstractExpression::Set(..) => "{...}".into(),
+                AbstractExpression::EmptySet => "{}".into(),
+                AbstractExpression::List(..) => "[...]".into(),
+                AbstractExpression::Capture(..) => "Capture...".into(),
+                AbstractExpression::Call(..) => "Call...".into(),
+                AbstractExpression::VariableReference(..) => "var...".into(),
+                AbstractExpression::Raise(exp) => format!("raise({})", exp),
+                AbstractExpression::Group(abstract_expression) => {
+                    format!("({})", abstract_expression)
+                }
+            }
+        )
     }
 }
 
@@ -143,18 +333,20 @@ fn parse_block(ts: &mut TokenStream) -> Result<AbstractBlock, SyntaxError> {
             if let Some((var, method)) = var {
                 statements.push(AbstractStatement::Update(AbstractUpdate {
                     var,
-                    expression: parse_expression(ts)?,
+                    expression: parse_expression_unordered(ts)?,
                     method,
                 }));
             } else {
                 ts_point.restore(ts);
-                statements.push(AbstractStatement::Expression(parse_expression(ts)?));
+                statements.push(AbstractStatement::Expression(parse_expression_unordered(
+                    ts,
+                )?));
             }
         }
     }
 
     let ts_point = ts.point();
-    let r#return = match parse_expression(ts) {
+    let r#return = match parse_expression_unordered(ts) {
         Ok(r#return) => Some(r#return.into()),
         Err(_) => {
             ts_point.restore(ts);
@@ -188,7 +380,7 @@ fn parse_let_statement(ts: &mut TokenStream) -> Result<AbstractDeclaration, Synt
     };
 
     let _assign = take_sig_of_type(ts, &TokenType::Assign)?;
-    let expression = parse_expression(ts)?;
+    let expression = parse_expression_unordered(ts)?;
 
     return Ok(AbstractDeclaration {
         open,
@@ -207,7 +399,7 @@ fn parse_list(ts: &mut TokenStream) -> Result<AbstractList, SyntaxError> {
             break;
         }
 
-        items.push(parse_expression(ts)?);
+        items.push(parse_expression_unordered(ts)?);
         absorb_comma_or_allow(ts, &TokenType::CloseBracket)?
     }
 
@@ -242,13 +434,13 @@ fn parse_capture(ts: &mut TokenStream) -> Result<AbstractCapture, SyntaxError> {
             None => return Err(SyntaxError::ExpectedToken(TokenType::Map, fli!())),
         };
 
-        let expression = parse_expression(ts)?;
+        let expression = parse_expression_unordered(ts)?;
         captures.push((err, var, expression));
 
         absorb_comma_or_allow(ts, &TokenType::CloseMap)?;
     }
 
-    let expression = parse_expression(ts)?;
+    let expression = parse_expression_unordered(ts)?;
 
     return Ok(AbstractCapture {
         captures,
@@ -265,7 +457,7 @@ fn parse_map_or_set(ts: &mut TokenStream) -> Result<MapOrSet, SyntaxError> {
             break;
         }
 
-        let item1 = parse_expression(ts)?;
+        let item1 = parse_expression_unordered(ts)?;
         let next = match ts.take_sig() {
             Some(next) => next,
             None => return Err(SyntaxError::ExpectedToken(TokenType::CloseMap, fli!())),
@@ -284,12 +476,12 @@ fn parse_map_or_set(ts: &mut TokenStream) -> Result<MapOrSet, SyntaxError> {
             }
             TokenType::Map => match setmap {
                 MapOrSet::Map(ref mut map) => {
-                    let value = parse_expression(ts)?;
+                    let value = parse_expression_unordered(ts)?;
                     let mapping = (item1, value);
                     map.mappings.push(mapping);
                 }
                 MapOrSet::Empty => {
-                    let value = parse_expression(ts)?;
+                    let value = parse_expression_unordered(ts)?;
                     setmap = MapOrSet::Map(AbstractMap {
                         mappings: vec![(item1, value)],
                     })
@@ -321,7 +513,7 @@ fn parse_binary_expression(
     left: AbstractExpression,
 ) -> Result<AbstractExpression, SyntaxError> {
     let operon = ts.etake();
-    let right = parse_expression(ts)?;
+    let right = parse_expression_unordered(ts)?;
     return Ok(AbstractExpression::BinaryOperation(
         left.into(),
         operon,
@@ -351,13 +543,13 @@ fn parse_call(ts: &mut TokenStream, func: AbstractExpression) -> Result<Abstract
 
         match args {
             AbstractCallArgs::ArgList(ref mut args) => {
-                let arg = parse_expression(ts)?;
+                let arg = parse_expression_unordered(ts)?;
                 args.push(arg);
             }
             AbstractCallArgs::NamedArgs(ref mut args) => {
                 let name = parse_identity(ts)?;
                 let _assign = take_sig_of_type(ts, &TokenType::Assign)?;
-                let val = parse_expression(ts)?;
+                let val = parse_expression_unordered(ts)?;
 
                 args.push((name, val));
             }
@@ -372,7 +564,7 @@ fn parse_call(ts: &mut TokenStream, func: AbstractExpression) -> Result<Abstract
     });
 }
 
-pub(super) fn parse_expression(ts: &mut TokenStream) -> Result<AbstractExpression, SyntaxError> {
+fn parse_expression_unordered(ts: &mut TokenStream) -> Result<AbstractExpression, SyntaxError> {
     let mut exp = None;
     loop {
         let token = match ts.take_sig() {
@@ -394,10 +586,7 @@ pub(super) fn parse_expression(ts: &mut TokenStream) -> Result<AbstractExpressio
                     ts.retake();
                     AbstractExpression::Call(parse_call(ts, exp.expect("EXP MUST EXIST HERE"))?)
                 }
-                TokenType::Factorial => AbstractExpression::UnaryOperation(
-                    token,
-                    exp.expect("EXP MUST EXIST HERE").into(),
-                ),
+
                 TokenType::Multiply
                 | TokenType::Subtract
                 | TokenType::GreaterThan
@@ -426,20 +615,23 @@ pub(super) fn parse_expression(ts: &mut TokenStream) -> Result<AbstractExpressio
                 TokenType::RealLit => AbstractExpression::RealLiteral(token),
                 TokenType::IntLit => AbstractExpression::IntLiteral(token),
                 TokenType::StrLit => AbstractExpression::StrLiteral(token),
-                TokenType::False => AbstractExpression::BoolLiteral(token),
-                TokenType::True => AbstractExpression::BoolLiteral(token),
+                TokenType::True | TokenType::False => AbstractExpression::BoolLiteral(token),
                 TokenType::Undefined => AbstractExpression::Undefined(token),
+                TokenType::Factorial | TokenType::Subtract => {
+                    AbstractExpression::UnaryOperation(token, parse_expression(ts)?.into())
+                }
                 TokenType::Capture => {
                     ts.retake();
                     AbstractExpression::Capture(parse_capture(ts)?)
                 }
                 TokenType::OpenParen => {
-                    let exp = parse_expression(ts)?;
+                    let exp = parse_expression_unordered(ts)?;
                     let _close_paren = take_sig_of_type(ts, &TokenType::CloseParen);
                     AbstractExpression::Group(exp.into())
                 }
-                TokenType::Raise => AbstractExpression::Raise(parse_expression(ts)?.into()),
-                TokenType::Subtract => AbstractExpression::Negate(parse_expression(ts)?.into()),
+                TokenType::Raise => {
+                    AbstractExpression::Raise(parse_expression_unordered(ts)?.into())
+                }
                 TokenType::DenoteBlock => {
                     ts.retake();
                     AbstractExpression::Block(parse_block(ts)?)
@@ -471,7 +663,6 @@ pub(super) fn parse_expression(ts: &mut TokenStream) -> Result<AbstractExpressio
             },
         };
 
-        expression_parser_log::send_html(&newexp);
         exp = Some(newexp);
     }
 
@@ -482,4 +673,11 @@ pub(super) fn parse_expression(ts: &mut TokenStream) -> Result<AbstractExpressio
             None => SyntaxError::ExpectedToken(TokenType::IncompleteToken, fli!()),
         }),
     };
+}
+
+pub(super) fn parse_expression(ts: &mut TokenStream) -> Result<AbstractExpression, SyntaxError> {
+    let exp = parse_expression_unordered(ts)?;
+    let sorted_exp = exp.sorted();
+    println!("{}", sorted_exp);
+    return Ok(sorted_exp);
 }

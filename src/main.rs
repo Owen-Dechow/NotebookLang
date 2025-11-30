@@ -6,7 +6,7 @@ mod parser;
 fn run_file<T: AsRef<Path>>(file: T) -> Result<(), Box<dyn std::error::Error>> {
     let mut ts = lexer::lex_file(file)?;
     let abstract_st = parser::parse_token_stream(&mut ts);
-    dbg!(abstract_st);
+    // dbg!(abstract_st);
 
     return Ok(());
 }

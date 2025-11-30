@@ -1,6 +1,6 @@
 use crate::{lexer::char_stream::CharStream, location::Location};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub(crate) enum TokenType {
     RealLit,
     Raise,

@@ -1,7 +1,6 @@
 mod abstract_expression;
 mod abstract_syntax_tree;
 mod abstract_type;
-mod expression_parser_log;
 mod syntax_error;
 
 #[macro_export]
